@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: ['*']
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  # ========================================
+  # Fetch dependencies on Linux using ocicl
+  # ========================================
+  fetch-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ocicl (Linux)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sbcl curl jq
+          OCICL_URL=$(curl -sL -H "Authorization: token $GH_TOKEN" \
+            https://api.github.com/repos/ocicl/ocicl/releases/latest | \
+            jq -r '.assets[] | select(.name | endswith("_amd64.deb")) | .browser_download_url')
+          curl -sL "$OCICL_URL" -o /tmp/ocicl.deb
+          sudo dpkg -i /tmp/ocicl.deb
+          ocicl setup > ~/.sbclrc
+
+      - name: Fetch Lisp dependencies
+        run: ocicl install
+
+      - name: Upload ocicl directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocicl-deps
+          path: ocicl
+          retention-days: 1
+
+  # ========================================
+  # Build and test
+  # ========================================
+  build:
+    needs: fetch-deps
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download ocicl dependencies
+        uses: actions/download-artifact@v4
+        with:
+          name: ocicl-deps
+          path: ocicl
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sbcl build-essential
+
+      - name: Build
+        run: make
+
+      - name: Test version
+        run: ./happening --version
+
+      - name: Test help
+        run: ./happening --help
+
+      - name: Test setup help
+        run: ./happening setup --help
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: happening-linux-amd64
+          path: ./happening
+          retention-days: 7

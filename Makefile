@@ -1,5 +1,7 @@
-web1: src/*.lisp *.asd
-	/usr/bin/sbcl --eval "(asdf:make :happening)" --quit
+all: happening
+
+happening: src/*.lisp *.asd
+	sbcl --eval "(asdf:make :happening)" --quit
 
 clean:
 	rm -rf *~ happening

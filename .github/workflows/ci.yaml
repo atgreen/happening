@@ -62,6 +62,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y sbcl build-essential
 
+      - name: Checkout ipverse country data
+        uses: actions/checkout@v4
+        with:
+          repository: ipverse/country-ip-blocks
+          path: data/country-ip-blocks
+
+      - name: Generate embedded GeoIP data
+        run: make generate-geoip
+
       - name: Build
         run: make
 

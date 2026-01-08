@@ -51,17 +51,27 @@
 
 (defun verify-password (password stored-hash)
   "Verify a password against a stored hash. Returns T if valid, NIL otherwise."
-  (let* ((parts (cl-ppcre:split "\\$" stored-hash))
-         (salt (hex-to-bytes (first parts)))
-         (expected-hash (hex-to-bytes (second parts)))
-         (password-bytes (ironclad:ascii-string-to-byte-array password))
-         (derived-key (ironclad:derive-key
-                       (ironclad:make-kdf 'ironclad:pbkdf2 :digest 'ironclad:sha256)
-                       password-bytes
-                       salt
-                       *pbkdf2-iterations*
-                       32)))
-    (equalp derived-key expected-hash)))
+  (handler-case
+      (let* ((parts (cl-ppcre:split "\\$" stored-hash)))
+        ;; Validate hash format: should be exactly salt$hash
+        (unless (= (length parts) 2)
+          (when (string= (uiop:getenv "DEBUG") "true")
+            (llog:debug (format nil "Invalid hash format: ~A parts" (length parts))))
+          (return-from verify-password nil))
+        (let* ((salt (hex-to-bytes (first parts)))
+               (expected-hash (hex-to-bytes (second parts)))
+               (password-bytes (ironclad:ascii-string-to-byte-array password))
+               (derived-key (ironclad:derive-key
+                             (ironclad:make-kdf 'ironclad:pbkdf2 :digest 'ironclad:sha256)
+                             password-bytes
+                             salt
+                             *pbkdf2-iterations*
+                             32)))
+          (equalp derived-key expected-hash)))
+    (error (e)
+      (when (string= (uiop:getenv "DEBUG") "true")
+        (llog:debug (format nil "Password verification error: ~A" e)))
+      nil)))
 
 ;;; ----------------------------------------------------------------------------
 ;;; Session management
@@ -130,11 +140,19 @@
   (let ((user (fetch-one
                "SELECT id, username, password_hash FROM users WHERE username = ?"
                username)))
-    (when (and user (verify-password password (getf user :|password_hash|)))
-      ;; Update last login time
-      (execute-sql "UPDATE users SET last_login = ? WHERE id = ?"
-                   (unix-timestamp) (getf user :|id|))
-      user)))
+    (when (string= (uiop:getenv "DEBUG") "true")
+      (llog:debug (format nil "Auth attempt for user: ~A, found: ~A"
+                          username (if user "yes" "no"))))
+    (if (null user)
+        nil
+        (let ((valid (verify-password password (getf user :|password_hash|))))
+          (when (string= (uiop:getenv "DEBUG") "true")
+            (llog:debug (format nil "Password verify result: ~A" valid)))
+          (when valid
+            ;; Update last login time
+            (execute-sql "UPDATE users SET last_login = ? WHERE id = ?"
+                         (unix-timestamp) (getf user :|id|))
+            user)))))
 
 (defun get-user-by-id (user-id)
   "Get user info by ID."
@@ -251,5 +269,11 @@
   "Require a valid CSRF token for POST requests.
    Returns 403 Forbidden and aborts if invalid."
   (unless (valid-csrf-token-p)
+    (when (string= (uiop:getenv "DEBUG") "true")
+      (let ((cookie-token (hunchentoot:cookie-in *csrf-cookie-name*))
+            (form-token (hunchentoot:post-parameter *csrf-form-field*)))
+        (llog:debug (format nil "CSRF validation failed - cookie: ~A, form: ~A"
+                            (if cookie-token "present" "missing")
+                            (if form-token "present" "missing")))))
     (setf (hunchentoot:return-code*) hunchentoot:+http-forbidden+)
     (hunchentoot:abort-request-handler)))

@@ -21,7 +21,7 @@ Initial release of Happening, a privacy-focused, self-hosted web analytics platf
 - Session tracking with bounce rate
 - Top pages and referrers
 - Device, browser, and OS breakdown
-- Country breakdown (with optional GeoLite2 database)
+- Country breakdown (embedded [ipverse/country-ip-blocks](https://github.com/ipverse/country-ip-blocks) data, works out of the box)
 - Daily traffic charts
 - Real-time visitor count
 

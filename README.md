@@ -7,6 +7,7 @@ A privacy-focused, self-hosted web analytics platform written in Common Lisp.
 - **Privacy-first** - No cookies, no personal data collection
 - **Self-hosted** - Your data stays on your server
 - **Automatic HTTPS** - Built-in Let's Encrypt certificate management via [pure-tls](https://github.com/atgreen/pure-tls)
+- **Country detection** - Built-in IP-to-country lookup (no external API calls)
 - **Lightweight** - Single binary, SQLite database, runs on free-tier cloud VMs (AWS, GCP, Azure, etc.)
 - **Simple setup** - Interactive wizard or command-line options
 
@@ -99,6 +100,20 @@ After setup, add this script to your website:
 <script defer src="https://analytics.example.com/js/script.js"
         data-api="https://analytics.example.com/api/event"></script>
 ```
+
+## Country Detection
+
+Country data from [ipverse/country-ip-blocks](https://github.com/ipverse/country-ip-blocks) is embedded in the binary—no setup required. To use fresher data, clone the repo:
+
+```sh
+git clone https://github.com/ipverse/country-ip-blocks data/country-ip-blocks
+```
+
+External data takes priority over embedded data. See [docs/GEOIP-SETUP.md](docs/GEOIP-SETUP.md) for details.
+
+## Acknowledgments
+
+- [ipverse/country-ip-blocks](https://github.com/ipverse/country-ip-blocks) - IP-to-country data (CC0 1.0 Public Domain)
 
 ## Development
 

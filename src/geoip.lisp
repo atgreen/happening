@@ -183,91 +183,142 @@
               into ranges
             finally (return (remove nil ranges))))))
 
+(defun load-external-geoip-data (repo-path)
+  "Load GeoIP data from external ipverse repository."
+  (handler-case
+      (let ((ipv4-ranges nil)
+            (ipv6-ranges nil)
+            (country-list nil)
+            (country-idx-map (make-hash-table :test 'equal))
+            (country-dir (merge-pathnames "country/" repo-path)))
+
+        ;; Iterate through country subdirectories
+        (dolist (entry (uiop:subdirectories country-dir))
+          (let* ((country-code (string-upcase
+                                (car (last (pathname-directory entry)))))
+                 (idx (or (gethash country-code country-idx-map)
+                          (let ((new-idx (length country-list)))
+                            (push country-code country-list)
+                            (setf (gethash country-code country-idx-map) new-idx)
+                            new-idx))))
+            ;; Load IPv4
+            (let ((v4-file (merge-pathnames "ipv4-aggregated.txt" entry)))
+              (dolist (range (load-ipv4-file v4-file))
+                (push (list (car range) (cdr range) idx) ipv4-ranges)))
+            ;; Load IPv6
+            (let ((v6-file (merge-pathnames "ipv6-aggregated.txt" entry)))
+              (dolist (range (load-ipv6-file v6-file))
+                (push (append range (list idx)) ipv6-ranges)))))
+
+        ;; Build IPv4 arrays
+        (setf ipv4-ranges (sort ipv4-ranges #'< :key #'first))
+        (let ((n (length ipv4-ranges)))
+          (setf *ipv4-starts* (make-array n :element-type '(unsigned-byte 32)))
+          (setf *ipv4-ends* (make-array n :element-type '(unsigned-byte 32)))
+          (setf *ipv4-countries* (make-array n :element-type '(unsigned-byte 8)))
+          (loop for (start end idx) in ipv4-ranges
+                for i from 0
+                do (setf (aref *ipv4-starts* i) start
+                         (aref *ipv4-ends* i) end
+                         (aref *ipv4-countries* i) idx)))
+
+        ;; Build IPv6 arrays (sort by high, then low)
+        (setf ipv6-ranges (sort ipv6-ranges
+                                (lambda (a b)
+                                  (or (< (first a) (first b))
+                                      (and (= (first a) (first b))
+                                           (< (second a) (second b)))))))
+        (let ((n (length ipv6-ranges)))
+          (setf *ipv6-starts-hi* (make-array n :element-type '(unsigned-byte 64)))
+          (setf *ipv6-starts-lo* (make-array n :element-type '(unsigned-byte 64)))
+          (setf *ipv6-ends-hi* (make-array n :element-type '(unsigned-byte 64)))
+          (setf *ipv6-ends-lo* (make-array n :element-type '(unsigned-byte 64)))
+          (setf *ipv6-countries* (make-array n :element-type '(unsigned-byte 8)))
+          (loop for (shi slo ehi elo idx) in ipv6-ranges
+                for i from 0
+                do (setf (aref *ipv6-starts-hi* i) shi
+                         (aref *ipv6-starts-lo* i) slo
+                         (aref *ipv6-ends-hi* i) ehi
+                         (aref *ipv6-ends-lo* i) elo
+                         (aref *ipv6-countries* i) idx)))
+
+        (setf *country-codes* (coerce (nreverse country-list) 'vector))
+        t)
+    (error (e)
+      (llog:error (format nil "Failed to load external GeoIP data: ~A" e))
+      nil)))
+
+(defun load-embedded-geoip-data ()
+  "Load GeoIP data from embedded arrays."
+  (when (and *embedded-ipv4-starts* (> (length *embedded-ipv4-starts*) 0))
+    ;; Convert simple vectors to typed arrays for IPv4
+    (let ((n (length *embedded-ipv4-starts*)))
+      (setf *ipv4-starts* (make-array n :element-type '(unsigned-byte 32)))
+      (setf *ipv4-ends* (make-array n :element-type '(unsigned-byte 32)))
+      (setf *ipv4-countries* (make-array n :element-type '(unsigned-byte 8)))
+      (loop for i from 0 below n
+            do (setf (aref *ipv4-starts* i) (aref *embedded-ipv4-starts* i)
+                     (aref *ipv4-ends* i) (aref *embedded-ipv4-ends* i)
+                     (aref *ipv4-countries* i) (aref *embedded-ipv4-countries* i))))
+
+    ;; Convert simple vectors to typed arrays for IPv6
+    (when (and *embedded-ipv6-starts-hi* (> (length *embedded-ipv6-starts-hi*) 0))
+      (let ((n (length *embedded-ipv6-starts-hi*)))
+        (setf *ipv6-starts-hi* (make-array n :element-type '(unsigned-byte 64)))
+        (setf *ipv6-starts-lo* (make-array n :element-type '(unsigned-byte 64)))
+        (setf *ipv6-ends-hi* (make-array n :element-type '(unsigned-byte 64)))
+        (setf *ipv6-ends-lo* (make-array n :element-type '(unsigned-byte 64)))
+        (setf *ipv6-countries* (make-array n :element-type '(unsigned-byte 8)))
+        (loop for i from 0 below n
+              do (setf (aref *ipv6-starts-hi* i) (aref *embedded-ipv6-starts-hi* i)
+                       (aref *ipv6-starts-lo* i) (aref *embedded-ipv6-starts-lo* i)
+                       (aref *ipv6-ends-hi* i) (aref *embedded-ipv6-ends-hi* i)
+                       (aref *ipv6-ends-lo* i) (aref *embedded-ipv6-ends-lo* i)
+                       (aref *ipv6-countries* i) (aref *embedded-ipv6-countries* i)))))
+
+    (setf *country-codes* (coerce *embedded-country-codes* 'vector))
+    t))
+
+(defun finalize-geoip-stats (source)
+  "Calculate and log GeoIP statistics after loading."
+  (let* ((v4-count (if *ipv4-starts* (length *ipv4-starts*) 0))
+         (v6-count (if *ipv6-starts-hi* (length *ipv6-starts-hi*) 0))
+         (v4-bytes (+ (* v4-count 4) (* v4-count 4) v4-count))
+         (v6-bytes (+ (* v6-count 8 4) v6-count))
+         (total-mb (/ (+ v4-bytes v6-bytes) 1048576.0)))
+    (setf *geoip-stats* (list :ipv4-ranges v4-count
+                              :ipv6-ranges v6-count
+                              :countries (if *country-codes* (length *country-codes*) 0)
+                              :memory-mb total-mb
+                              :source source))
+    (llog:info (format nil "Loaded ~A IPv4 + ~A IPv6 ranges for ~A countries (~,1F MB) [~A]"
+                       v4-count v6-count
+                       (if *country-codes* (length *country-codes*) 0)
+                       total-mb source))))
+
 (defun load-geoip-database (&optional path)
-  "Load IP-to-country data from the ipverse/country-ip-blocks repository."
+  "Load IP-to-country data. Prefers external ipverse repository, falls back to embedded data."
   (let ((repo-path (or path (default-country-ip-blocks-path))))
-    (if (probe-file (merge-pathnames "country/" repo-path))
-        (handler-case
-            (let ((ipv4-ranges nil)
-                  (ipv6-ranges nil)
-                  (country-list nil)
-                  (country-idx-map (make-hash-table :test 'equal))
-                  (country-dir (merge-pathnames "country/" repo-path)))
+    (cond
+      ;; Try external data first (more up-to-date)
+      ((probe-file (merge-pathnames "country/" repo-path))
+       (if (load-external-geoip-data repo-path)
+           (finalize-geoip-stats "external")
+           ;; External failed, try embedded as fallback
+           (when (load-embedded-geoip-data)
+             (finalize-geoip-stats "embedded"))))
 
-              ;; Iterate through country subdirectories
-              (dolist (entry (uiop:subdirectories country-dir))
-                (let* ((country-code (string-upcase
-                                      (car (last (pathname-directory entry)))))
-                       (idx (or (gethash country-code country-idx-map)
-                                (let ((new-idx (length country-list)))
-                                  (push country-code country-list)
-                                  (setf (gethash country-code country-idx-map) new-idx)
-                                  new-idx))))
-                  ;; Load IPv4
-                  (let ((v4-file (merge-pathnames "ipv4-aggregated.txt" entry)))
-                    (dolist (range (load-ipv4-file v4-file))
-                      (push (list (car range) (cdr range) idx) ipv4-ranges)))
-                  ;; Load IPv6
-                  (let ((v6-file (merge-pathnames "ipv6-aggregated.txt" entry)))
-                    (dolist (range (load-ipv6-file v6-file))
-                      (push (append range (list idx)) ipv6-ranges)))))
+      ;; No external data, try embedded
+      ((and *embedded-ipv4-starts* (> (length *embedded-ipv4-starts*) 0))
+       (if (load-embedded-geoip-data)
+           (finalize-geoip-stats "embedded")
+           (llog:info "Failed to load embedded GeoIP data")))
 
-              ;; Build IPv4 arrays
-              (setf ipv4-ranges (sort ipv4-ranges #'< :key #'first))
-              (let ((n (length ipv4-ranges)))
-                (setf *ipv4-starts* (make-array n :element-type '(unsigned-byte 32)))
-                (setf *ipv4-ends* (make-array n :element-type '(unsigned-byte 32)))
-                (setf *ipv4-countries* (make-array n :element-type '(unsigned-byte 8)))
-                (loop for (start end idx) in ipv4-ranges
-                      for i from 0
-                      do (setf (aref *ipv4-starts* i) start
-                               (aref *ipv4-ends* i) end
-                               (aref *ipv4-countries* i) idx)))
-
-              ;; Build IPv6 arrays (sort by high, then low)
-              (setf ipv6-ranges (sort ipv6-ranges
-                                      (lambda (a b)
-                                        (or (< (first a) (first b))
-                                            (and (= (first a) (first b))
-                                                 (< (second a) (second b)))))))
-              (let ((n (length ipv6-ranges)))
-                (setf *ipv6-starts-hi* (make-array n :element-type '(unsigned-byte 64)))
-                (setf *ipv6-starts-lo* (make-array n :element-type '(unsigned-byte 64)))
-                (setf *ipv6-ends-hi* (make-array n :element-type '(unsigned-byte 64)))
-                (setf *ipv6-ends-lo* (make-array n :element-type '(unsigned-byte 64)))
-                (setf *ipv6-countries* (make-array n :element-type '(unsigned-byte 8)))
-                (loop for (shi slo ehi elo idx) in ipv6-ranges
-                      for i from 0
-                      do (setf (aref *ipv6-starts-hi* i) shi
-                               (aref *ipv6-starts-lo* i) slo
-                               (aref *ipv6-ends-hi* i) ehi
-                               (aref *ipv6-ends-lo* i) elo
-                               (aref *ipv6-countries* i) idx)))
-
-              (setf *country-codes* (coerce (nreverse country-list) 'vector))
-
-              ;; Calculate memory usage
-              (let* ((v4-count (length *ipv4-starts*))
-                     (v6-count (length *ipv6-starts-hi*))
-                     (v4-bytes (+ (* v4-count 4) (* v4-count 4) v4-count))
-                     (v6-bytes (+ (* v6-count 8 4) v6-count))
-                     (total-mb (/ (+ v4-bytes v6-bytes) 1048576.0)))
-                (setf *geoip-stats* (list :ipv4-ranges v4-count
-                                          :ipv6-ranges v6-count
-                                          :countries (length *country-codes*)
-                                          :memory-mb total-mb))
-                (llog:info (format nil "Loaded ~A IPv4 + ~A IPv6 ranges for ~A countries (~,1F MB)"
-                                   v4-count v6-count (length *country-codes*) total-mb)))
-              t)
-          (error (e)
-            (llog:error (format nil "Failed to load GeoIP data: ~A" e))
-            (setf *ipv4-starts* nil *ipv6-starts-hi* nil)
-            nil))
-        (progn
-          (llog:info "GeoIP data not found (country lookup disabled)")
-          (llog:info (format nil "To enable: git clone https://github.com/ipverse/country-ip-blocks ~A"
-                             repo-path))
-          nil))))
+      ;; No data available
+      (t
+       (llog:info "GeoIP data not available (country lookup disabled)")
+       (llog:info "To enable with latest data: git clone https://github.com/ipverse/country-ip-blocks data/country-ip-blocks")
+       nil))))
 
 (defun geoip-available-p ()
   "Check if GeoIP lookup is available."

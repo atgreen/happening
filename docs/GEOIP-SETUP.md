@@ -1,39 +1,63 @@
 # GeoIP Setup
 
-Happening can show visitor countries using the [ipverse/country-ip-blocks](https://github.com/ipverse/country-ip-blocks) database. This is optional - if the data isn't present, country information simply won't be collected.
+Happening includes embedded IP-to-country data from [ipverse/country-ip-blocks](https://github.com/ipverse/country-ip-blocks), so country lookup works out of the box.
 
-## Setup
+## Default Behavior
 
-Clone the country-ip-blocks repository into Happening's data directory:
+When Happening starts, it will:
+1. Check if an external ipverse repository exists at `data/country-ip-blocks/`
+2. If found, use the external data (more up-to-date)
+3. Otherwise, use the embedded data (included in the binary)
+
+You should see a log message like:
+```
+Loaded 174665 IPv4 + 67683 IPv6 ranges for 237 countries (3.6 MB) [embedded]
+```
+
+Or with external data:
+```
+Loaded 174665 IPv4 + 67683 IPv6 ranges for 237 countries (3.6 MB) [external]
+```
+
+## Updating Country Data
+
+The embedded data is from when Happening was built. To get the latest IP allocations:
+
+### Option 1: Use External Repository (Recommended for Production)
+
+Clone the ipverse repository for up-to-date data:
 
 ```bash
 cd /path/to/happening
 git clone https://github.com/ipverse/country-ip-blocks data/country-ip-blocks
 ```
 
-Restart Happening. You should see a log message like:
-```
-Loaded 180000 IP ranges from 249 countries
-```
-
-## Updating
-
-The ipverse database is updated regularly. To get the latest data:
-
+To update periodically:
 ```bash
 cd data/country-ip-blocks
 git pull
 ```
 
-Then restart Happening to reload the data.
-
-You can automate this with a cron job:
+Then restart Happening. You can automate this with a cron job:
 ```bash
 # Weekly update (Sundays at 3am)
 0 3 * * 0 cd /path/to/happening/data/country-ip-blocks && git pull
 ```
 
-Note: Happening loads the data at startup, so you'll need to restart after pulling updates.
+### Option 2: Rebuild with Updated Embedded Data
+
+If you're building from source and want to update the embedded data:
+
+```bash
+# Clone/update ipverse data
+git clone https://github.com/ipverse/country-ip-blocks data/country-ip-blocks
+
+# Generate new embedded data
+make generate-geoip
+
+# Rebuild Happening
+make clean && make
+```
 
 ## Privacy Notes
 
@@ -45,22 +69,25 @@ Note: Happening loads the data at startup, so you'll need to restart after pulli
 ## How It Works
 
 On startup, Happening:
-1. Checks if `data/country-ip-blocks/country/` exists
-2. Reads all `ipv4-aggregated.txt` and `ipv6-aggregated.txt` files
+1. Checks if `data/country-ip-blocks/country/` exists (external data)
+2. If not, uses embedded data compiled into the binary
 3. Builds sorted in-memory indices for fast binary search lookups
 
 Memory usage with packed arrays:
-- IPv4: ~9 bytes per range (~1.6 MB for ~180,000 ranges)
-- IPv6: ~33 bytes per range (~3 MB for ~90,000 ranges)
-- Total: ~5 MB typical
+- IPv4: ~9 bytes per range (~1.6 MB for ~175,000 ranges)
+- IPv6: ~33 bytes per range (~2.2 MB for ~68,000 ranges)
+- Total: ~3.6 MB typical
 
 ## Troubleshooting
 
-**"GeoIP data not found" message**
+**"GeoIP data not available" message**
 
-The repository wasn't found. Check:
-- Directory exists at `./data/country-ip-blocks/`
-- The `country/` subdirectory exists with country folders inside
+The embedded data wasn't included at build time. Rebuild with:
+```bash
+git clone https://github.com/ipverse/country-ip-blocks data/country-ip-blocks
+make generate-geoip
+make clean && make
+```
 
 **Countries showing as "Unknown"**
 
@@ -68,3 +95,10 @@ This happens for:
 - Events recorded before GeoIP data was loaded
 - Private/internal IP addresses (localhost, 10.x.x.x, 192.168.x.x, fc00::/7)
 - IPs not covered by any country's allocation
+
+**Want the latest data without rebuilding?**
+
+Just clone the external repository - it takes priority over embedded data:
+```bash
+git clone https://github.com/ipverse/country-ip-blocks data/country-ip-blocks
+```

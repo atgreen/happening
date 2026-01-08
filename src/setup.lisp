@@ -34,7 +34,7 @@
                           (cl-who:str (html-escape error-message)))))
 
                  (:form :method "POST" :action "/setup"
-                        (:raw (csrf-token-field))
+                        (cl-who:fmt "~A" (csrf-token-field))
                         (:h2 "Create Admin Account")
                         (:div :class "form-group"
                               (:label :for "username" "Username")
@@ -167,7 +167,7 @@
                           (cl-who:str (html-escape error-message)))))
 
                  (:form :method "POST" :action "/login"
-                        (:raw (csrf-token-field))
+                        (cl-who:fmt "~A" (csrf-token-field))
                         (:div :class "form-group"
                               (:label :for "username" "Username")
                               (:input :type "text" :id "username" :name "username"
@@ -231,7 +231,7 @@
                           (cl-who:str (html-escape error-message)))))
 
                  (:form :method "POST" :action "/sites/new"
-                        (:raw (csrf-token-field))
+                        (cl-who:fmt "~A" (csrf-token-field))
                         (:div :class "form-group"
                               (:label :for "domain" "Website Domain")
                               (:input :type "text" :id "domain" :name "domain"

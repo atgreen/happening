@@ -138,7 +138,9 @@
                         (user-id (create-user username password)))
                    (if user-id
                        (progn
+                         ;; Persist base URL to database and global
                          (setf *base-url* url)
+                         (set-config "base_url" url)
                          (setf (setup-complete model) t))
                        (setf (setup-error-message model) "Failed to create user"))))))))
        (values model nil))

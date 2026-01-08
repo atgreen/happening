@@ -59,6 +59,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y sbcl build-essential
 
+      - name: Checkout ipverse country data
+        uses: actions/checkout@v4
+        with:
+          repository: ipverse/country-ip-blocks
+          path: data/country-ip-blocks
+
+      - name: Generate embedded GeoIP data
+        run: make generate-geoip
+
       - name: Build
         run: make
 
@@ -74,6 +83,7 @@ jobs:
           mkdir -p dist
           cp happening dist/
           cp README.md LICENSE dist/ 2>/dev/null || true
+          cp -r LICENSES dist/ 2>/dev/null || true
           cd dist && tar czf ../happening-${VERSION}-linux-amd64.tar.gz *
 
       - name: Calculate checksum

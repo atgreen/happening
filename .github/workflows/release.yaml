@@ -117,22 +117,7 @@ jobs:
         with:
           tag: ${{ github.ref_name }}
           name: Happening ${{ github.ref_name }}
-          body: |
-            ## Happening ${{ github.ref_name }}
-
-            Privacy-focused, self-hosted web analytics.
-
-            ### Installation
-
-            Download the binary and run:
-            ```bash
-            tar xzf happening-${{ steps.get_version.outputs.version }}-linux-amd64.tar.gz
-            ./happening setup -a admin -P yourpassword -u https://your-domain.com
-            ./happening -u https://your-domain.com
-            ```
-
-            ### Checksums
-            See `checksums-linux.txt` for SHA256 checksums.
+          bodyFile: docs/release-notes/RELEASE-NOTES-${{ steps.get_version.outputs.version }}.md
           artifacts: |
             artifacts/linux-package/happening-*-linux-*.tar.gz
             artifacts/linux-package/checksums-linux.txt

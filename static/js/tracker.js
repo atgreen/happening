@@ -1,0 +1,1 @@
+!function(s,n,d){s&&n.sendBeacon((d.currentScript?.src?new URL(d.currentScript.src).origin:"")+"/api/event",JSON.stringify({site_id:s,url:location.href,referrer:d.referrer,viewport:{width:innerWidth},timestamp:Date.now()}))}(HAPPENING_SITE_ID,navigator,document)

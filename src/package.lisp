@@ -17,6 +17,11 @@
    #:get-config
    #:set-config
 
+   ;; GeoIP
+   #:load-geoip-database
+   #:geoip-available-p
+   #:lookup-country
+
    ;; Server
    #:start-server
    #:stop-server

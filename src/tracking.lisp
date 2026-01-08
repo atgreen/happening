@@ -130,11 +130,13 @@
 
   (let* ((visitor-hash (generate-visitor-hash ip user-agent))
          (session-id (generate-session-id visitor-hash timestamp))
-         (ua-info (parse-user-agent user-agent)))
+         (ua-info (parse-user-agent user-agent))
+         ;; Look up country from IP (before discarding IP)
+         (country (lookup-country ip)))
     (execute-sql
      "INSERT INTO events (site_id, timestamp, visitor_hash, session_id, url, referrer,
-                          device_type, browser, os, viewport_width)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                          device_type, browser, os, country, viewport_width)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
      site-id
      timestamp
      visitor-hash
@@ -144,6 +146,7 @@
      (getf ua-info :device-type)
      (getf ua-info :browser)
      (getf ua-info :os)
+     country
      viewport-width)
     t))
 

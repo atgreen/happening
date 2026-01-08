@@ -140,6 +140,16 @@
       GROUP BY os ORDER BY count DESC"
      site-id start-ts end-ts)))
 
+(defun get-country-breakdown (site-id start-date end-date &optional (limit 10))
+  "Get country breakdown for a site in the date range."
+  (let* ((start-ts (date-to-timestamp start-date))
+         (end-ts (+ (date-to-timestamp end-date) (* 24 60 60 1000))))
+    (fetch-all
+     "SELECT COALESCE(country, 'Unknown') as country, COUNT(*) as count FROM events
+      WHERE site_id = ? AND timestamp >= ? AND timestamp < ?
+      GROUP BY country ORDER BY count DESC LIMIT ?"
+     site-id start-ts end-ts limit)))
+
 (defun get-daily-stats (site-id start-date end-date)
   "Get daily statistics for a site in the date range."
   (let* ((start-ts (date-to-timestamp start-date))
@@ -179,6 +189,7 @@
         :top-referrers (get-top-referrers site-id start-date end-date)
         :devices (get-device-breakdown site-id start-date end-date)
         :browsers (get-browser-breakdown site-id start-date end-date)
+        :countries (get-country-breakdown site-id start-date end-date)
         :daily (get-daily-stats site-id start-date end-date)
         :realtime (get-realtime-visitors site-id)))
 
@@ -348,6 +359,16 @@
                            (loop for browser in (getf stats :browsers)
                                  collect (list (getf browser :|browser|)
                                                (format-number (getf browser :|count|)))))))
+
+                   ;; Countries
+                   (:div :class "dashboard-panel"
+                         (:h3 "Countries")
+                         (cl-who:str
+                          (render-table
+                           '("Country" "Count")
+                           (loop for country in (getf stats :countries)
+                                 collect (list (getf country :|country|)
+                                               (format-number (getf country :|count|)))))))
 
                    ;; Chart data for JS
                    (:script

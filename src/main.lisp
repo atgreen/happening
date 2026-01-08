@@ -193,6 +193,9 @@
                   (llog:info "Initializing Happening analytics...")
                   (init-database db-path)
 
+                  ;; Load GeoIP database if available
+                  (load-geoip-database)
+
                   ;; Set public base URL for tracking snippets
                   ;; Priority: CLI option > database config
                   (setf *base-url* (or base-url

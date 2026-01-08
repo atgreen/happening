@@ -40,6 +40,7 @@
   :serial      t
   :components  ((:file "src/package")
                 (:file "src/db")
+                (:file "src/geoip")
                 (:file "src/auth")
                 (:file "src/sites")
                 (:file "src/tracking")

@@ -97,8 +97,9 @@
                           (format t "  URL: ~A~%" url)
                           (format t "  Domain: ~A~%" domain)
 
-                          ;; Set base URL
+                          ;; Set and persist base URL
                           (setf *base-url* url)
+                          (set-config "base_url" url)
 
                           ;; Create admin user
                           (let ((user-id (create-user admin password)))
@@ -193,8 +194,10 @@
                   (init-database db-path)
 
                   ;; Set public base URL for tracking snippets
-                  (when base-url
-                    (setf *base-url* base-url))
+                  ;; Priority: CLI option > database config
+                  (setf *base-url* (or base-url
+                                       (get-config "base_url")
+                                       *base-url*))
 
                   ;; Run TUI setup wizard if needed
                   (when (and (needs-setup-p) (not (run-setup-wizard)))

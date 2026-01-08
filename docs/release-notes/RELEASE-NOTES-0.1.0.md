@@ -49,7 +49,7 @@ happening setup -a admin -P password -u https://analytics.example.com -e admin@e
 ```bash
 tar xzf happening-0.1.0-linux-amd64.tar.gz
 ./happening setup -a admin -P yourpassword -u https://your-domain.com
-./happening -u https://your-domain.com
+./happening
 ```
 
 ## Security

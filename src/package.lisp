@@ -14,6 +14,8 @@
    ;; Database
    #:init-database
    #:close-database
+   #:get-config
+   #:set-config
 
    ;; Server
    #:start-server

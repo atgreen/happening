@@ -153,7 +153,31 @@
       UNIQUE(site_id, date)
     )")
 
+  ;; Config table for persistent settings
+  (dbi:do-sql *db* "
+    CREATE TABLE IF NOT EXISTS config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )")
+
   (llog:info "Database schema ready"))
+
+;;; ----------------------------------------------------------------------------
+;;; Config helpers
+;;; ----------------------------------------------------------------------------
+
+(defun get-config (key &optional default)
+  "Get a configuration value by key."
+  (let ((result (fetch-one "SELECT value FROM config WHERE key = ?" key)))
+    (if result
+        (getf result :|value|)
+        default)))
+
+(defun set-config (key value)
+  "Set a configuration value."
+  (execute-sql
+   "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)"
+   key value))
 
 ;;; ----------------------------------------------------------------------------
 ;;; Query helpers

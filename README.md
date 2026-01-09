@@ -61,7 +61,7 @@ Or non-interactive:
 | Variable | Description |
 |----------|-------------|
 | `ACME_EMAIL` | Contact email for Let's Encrypt account |
-| `ACME_PRODUCTION` | Set to `true` for production certificates (default: staging) |
+| `ACME_STAGING` | Set to `true` for staging certificates (default: production) |
 | `ACME_CERT_PATH` | Custom certificate storage path |
 | `ACME_RENEWAL_DAYS` | Days before expiry to trigger renewal (default: 30) |
 
@@ -86,9 +86,8 @@ When you specify an `https://` URL with `-u`, Happening automatically:
   -u https://analytics.example.com \
   -e admin@example.com
 
-# Run with production certificates
+# Run with production certificates (default)
 ACME_EMAIL=admin@example.com \
-ACME_PRODUCTION=true \
 ./happening -u https://analytics.example.com
 ```
 

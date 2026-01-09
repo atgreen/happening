@@ -51,8 +51,8 @@ ssh -o IdentitiesOnly=yes -i ~/happening.pem fedora@ec2-18-219-1-5.us-east-2.com
 ## ACME/TLS Notes
 
 ### Let's Encrypt URLs
-- **Staging** (default): `https://acme-staging-v02.api.letsencrypt.org/directory`
-- **Production**: `https://acme-v02.api.letsencrypt.org/directory`
+- **Production** (default): `https://acme-v02.api.letsencrypt.org/directory`
+- **Staging**: `https://acme-staging-v02.api.letsencrypt.org/directory` (set `ACME_STAGING=true`)
 
 ### RSA Key Generation
 Ironclad generates random public exponents by default. X.509/Let's Encrypt requires e=65537.
@@ -76,7 +76,7 @@ openssl asn1parse -in /root/certs/acme-validation-cert-DEBUG.pem
 ## Key Files
 
 - `src/main.lisp` - CLI entry point with setup subcommand
-- `src/tls.lisp` - TLS server integration, `obtain-certificate-for-domain`
+- `src/tls.lisp` - TLS server integration, `make-happening-acme-acceptor`
 - `ocicl/pure-tls-*/acme/csr.lisp` - CSR generation, RSA key generation
 - `ocicl/pure-tls-*/acme/client.lisp` - ACME protocol client
 - `ocicl/pure-tls-*/acme/challenges.lisp` - TLS-ALPN-01 challenge handler

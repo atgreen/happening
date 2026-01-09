@@ -117,8 +117,8 @@
                                 ;; HTTPS setup - show required environment variables
                                 (progn
                                   (format t "  ACME_EMAIL=~A ./happening -u ~A~%" email url)
-                                  (format t "~%For production Let's Encrypt certificates:~%")
-                                  (format t "  ACME_EMAIL=~A ACME_PRODUCTION=true ./happening -u ~A~%" email url)
+                                  (format t "~%For staging Let's Encrypt certificates (testing):~%")
+                                  (format t "  ACME_EMAIL=~A ACME_STAGING=true ./happening -u ~A~%" email url)
                                   (format t "~%TLS certificates will be obtained automatically on first start.~%"))
                                 ;; HTTP-only setup
                                 (format t "  ./happening -u ~A~%" url))

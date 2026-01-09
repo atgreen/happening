@@ -84,7 +84,7 @@ parse-declarations-1.0, ghcr.io/ocicl/parse-declarations-1.0@sha256:9305fa962420
 parse-number, ghcr.io/ocicl/parse-number@sha256:11f3f9f512871e1f96cea6b8260aa3610e34e8fd7272bbcdb210fd3c5dd8025c, parse-number-20240503-cb9e487/parse-number.asd
 pathname-utils, ghcr.io/ocicl/pathname-utils@sha256:082998dd41f934bbacdbc7695cd61d64ea115cd115f6de33d94b8393b4f44cc2, pathname-utils-20250813-d0d4525/pathname-utils.asd
 pathname-utils-test, ghcr.io/ocicl/pathname-utils@sha256:082998dd41f934bbacdbc7695cd61d64ea115cd115f6de33d94b8393b4f44cc2, pathname-utils-20250813-d0d4525/pathname-utils-test.asd
-pure-tls, ghcr.io/ocicl/pure-tls@sha256:228a3e952c55a5dfadb5ccd1f70e49e142d30401fc85ab10d9274f3bb9ae8b6c, pure-tls-20260107-f1bc4bf/pure-tls.asd
+pure-tls, ghcr.io/ocicl/pure-tls@sha256:d95910bab1ccc5a18bce7ad2161671e19abda214ff0b4a8d0cfbc0c71320ca55, pure-tls-20260109-e061e0d/pure-tls.asd
 puri, ghcr.io/ocicl/puri@sha256:f6aa091a4d8eb5bdc91466daddc90dadd5b0fcf247370df237a223dc0588f29d, puri-4bbab9/puri.asd
 quri, ghcr.io/ocicl/quri@sha256:e2559f91600e4895e115b42dde88fcaac3677f051335d73431888dcf7af99f95, quri-0.7.0/quri.asd
 quri-test, ghcr.io/ocicl/quri@sha256:e2559f91600e4895e115b42dde88fcaac3677f051335d73431888dcf7af99f95, quri-0.7.0/quri-test.asd

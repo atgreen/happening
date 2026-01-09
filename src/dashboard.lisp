@@ -91,24 +91,67 @@
         (/ (float bounces) total))))
 
 (defun get-top-pages (site-id start-date end-date &optional (limit 10))
-  "Get top pages for a site in the date range."
+  "Get top pages for a site in the date range.
+   Aggregates by URL path to combine entries with different query strings."
   (let* ((start-ts (date-to-timestamp start-date))
-         (end-ts (+ (date-to-timestamp end-date) (* 24 60 60 1000))))
-    (fetch-all
-     "SELECT url, COUNT(*) as views FROM events
-      WHERE site_id = ? AND timestamp >= ? AND timestamp < ?
-      GROUP BY url ORDER BY views DESC LIMIT ?"
-     site-id start-ts end-ts limit)))
+         (end-ts (+ (date-to-timestamp end-date) (* 24 60 60 1000)))
+         ;; Fetch raw URLs
+         (raw-pages (fetch-all
+                     "SELECT url, COUNT(*) as views FROM events
+                      WHERE site_id = ? AND timestamp >= ? AND timestamp < ?
+                      GROUP BY url"
+                     site-id start-ts end-ts))
+         ;; Aggregate by path
+         (path-counts (make-hash-table :test #'equal)))
+    ;; Group by extracted path
+    (dolist (page raw-pages)
+      (let* ((url (getf page :|url|))
+             (views (getf page :|views|))
+             (path (format-url-path url)))
+        (incf (gethash path path-counts 0) views)))
+    ;; Convert to sorted list
+    (let ((results nil))
+      (maphash (lambda (path views)
+                 (push (list :|url| path :|views| views) results))
+               path-counts)
+      (setf results (sort results #'> :key (lambda (r) (getf r :|views|))))
+      (subseq results 0 (min limit (length results))))))
 
 (defun get-top-referrers (site-id start-date end-date &optional (limit 10))
-  "Get top referrers for a site in the date range."
+  "Get top referrers for a site in the date range.
+   Aggregates by domain, filters self-referrals, and returns clean domain names."
   (let* ((start-ts (date-to-timestamp start-date))
-         (end-ts (+ (date-to-timestamp end-date) (* 24 60 60 1000))))
-    (fetch-all
-     "SELECT COALESCE(referrer, '(direct)') as referrer, COUNT(*) as views FROM events
-      WHERE site_id = ? AND timestamp >= ? AND timestamp < ?
-      GROUP BY referrer ORDER BY views DESC LIMIT ?"
-     site-id start-ts end-ts limit)))
+         (end-ts (+ (date-to-timestamp end-date) (* 24 60 60 1000)))
+         ;; Get site domain to filter self-referrals
+         (site (get-site site-id))
+         (site-domain (when site (getf site :|domain|)))
+         ;; Fetch raw referrers
+         (raw-referrers (fetch-all
+                         "SELECT referrer, COUNT(*) as views FROM events
+                          WHERE site_id = ? AND timestamp >= ? AND timestamp < ?
+                          GROUP BY referrer ORDER BY views DESC"
+                         site-id start-ts end-ts))
+         ;; Aggregate by domain
+         (domain-counts (make-hash-table :test #'equal)))
+    ;; Group by extracted domain
+    (dolist (ref raw-referrers)
+      (let* ((referrer (getf ref :|referrer|))
+             (views (getf ref :|views|))
+             (domain (extract-referrer-domain referrer)))
+        ;; Skip self-referrals
+        (unless (and site-domain
+                     (not (string= domain "(direct)"))
+                     (or (string= domain site-domain)
+                         (string= domain (concatenate 'string "www." site-domain))
+                         (search site-domain domain)))
+          (incf (gethash domain domain-counts 0) views))))
+    ;; Convert to sorted list
+    (let ((results nil))
+      (maphash (lambda (domain views)
+                 (push (list :|referrer| domain :|views| views) results))
+               domain-counts)
+      (setf results (sort results #'> :key (lambda (r) (getf r :|views|))))
+      (subseq results 0 (min limit (length results))))))
 
 (defun get-device-breakdown (site-id start-date end-date)
   "Get device type breakdown for a site in the date range."
@@ -228,6 +271,27 @@
         (or (quri:uri-path parsed) "/"))
     (error () url)))
 
+(defun extract-referrer-domain (referrer)
+  "Extract just the domain from a referrer URL.
+   Returns '(direct)' for nil/empty, domain for valid URLs."
+  (cond
+    ((or (null referrer)
+         (string= referrer "")
+         (string= referrer "(direct)"))
+     "(direct)")
+    (t
+     (handler-case
+         (let* ((parsed (quri:uri referrer))
+                (host (quri:uri-host parsed)))
+           (if (and host (> (length host) 0))
+               ;; Strip www. prefix for cleaner display
+               (if (and (> (length host) 4)
+                        (string= "www." (subseq host 0 4)))
+                   (subseq host 4)
+                   host)
+               "(direct)"))
+       (error () referrer)))))
+
 ;;; ----------------------------------------------------------------------------
 ;;; HTML page templates
 ;;; ----------------------------------------------------------------------------
@@ -320,8 +384,8 @@
 
              ;; Two-column layout for tables
              (:div :class "dashboard-grid"
-                   ;; Top Pages
-                   (:div :class "dashboard-panel"
+                   ;; Top Pages (spans 2 columns)
+                   (:div :class "dashboard-panel panel-wide"
                          (:h3 "Top Pages")
                          (cl-who:str
                           (render-table
@@ -380,5 +444,5 @@
                                                      (cons "visitors" (getf day :|visitors|))))))))
              ;; Footer
              (:footer :class "dashboard-footer"
-                      (:p "Powered by Happening Analytics"))))
+                      (:p (cl-who:fmt "Happening v~A" +version+)))))
      :include-charts t)))

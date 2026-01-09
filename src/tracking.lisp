@@ -117,6 +117,99 @@
         :os (parse-os user-agent)))
 
 ;;; ----------------------------------------------------------------------------
+;;; URL cleaning (strip tracking parameters)
+;;; ----------------------------------------------------------------------------
+
+(defparameter *tracking-params*
+  '("fbclid"        ; Facebook
+    "gclid"         ; Google Ads
+    "gad_source"    ; Google Ads
+    "gbraid"        ; Google Ads (iOS)
+    "wbraid"        ; Google Ads (web-to-app)
+    "dclid"         ; Google Display
+    "msclkid"       ; Microsoft/Bing Ads
+    "twclid"        ; Twitter
+    "li_fat_id"     ; LinkedIn
+    "mc_eid"        ; Mailchimp
+    "mc_cid"        ; Mailchimp
+    "_hsenc"        ; HubSpot
+    "_hsmi"         ; HubSpot
+    "hsa_acc"       ; HubSpot Ads
+    "hsa_cam"       ; HubSpot Ads
+    "hsa_grp"       ; HubSpot Ads
+    "hsa_ad"        ; HubSpot Ads
+    "hsa_src"       ; HubSpot Ads
+    "hsa_tgt"       ; HubSpot Ads
+    "hsa_kw"        ; HubSpot Ads
+    "hsa_mt"        ; HubSpot Ads
+    "hsa_net"       ; HubSpot Ads
+    "hsa_ver"       ; HubSpot Ads
+    "utm_source"    ; UTM tracking
+    "utm_medium"    ; UTM tracking
+    "utm_campaign"  ; UTM tracking
+    "utm_term"      ; UTM tracking
+    "utm_content"   ; UTM tracking
+    "utm_id"        ; UTM tracking
+    "utm_source_platform"  ; UTM tracking
+    "utm_creative_format"  ; UTM tracking
+    "utm_marketing_tactic" ; UTM tracking
+    "oly_enc_id"    ; Omeda
+    "oly_anon_id"   ; Omeda
+    "vero_id"       ; Vero
+    "vero_conv"     ; Vero
+    "_ga"           ; Google Analytics
+    "_gl"           ; Google Linker
+    "spm"           ; Alibaba
+    "scm"           ; Alibaba
+    "pvid"          ; Alibaba
+    "algo"          ; Alibaba
+    "aff"           ; Affiliate tracking
+    "ref"           ; Referral tracking
+    "s_kwcid"       ; Adobe Analytics
+    "ef_id"         ; Adobe Advertising Cloud
+    "epik"          ; Pinterest
+    "igshid"        ; Instagram
+    "si"            ; Spotify
+    )
+  "List of tracking query parameters to strip from URLs.")
+
+(defun strip-tracking-params (url)
+  "Strip known tracking parameters from URL while preserving meaningful ones.
+   Returns the cleaned URL."
+  (when (null url)
+    (return-from strip-tracking-params nil))
+  (let ((query-start (position #\? url)))
+    (if (null query-start)
+        ;; No query string, return as-is
+        url
+        (let* ((base-url (subseq url 0 query-start))
+               (query-string (subseq url (1+ query-start)))
+               ;; Handle fragment (hash) if present
+               (fragment-start (position #\# query-string))
+               (fragment (when fragment-start (subseq query-string fragment-start)))
+               (query-only (if fragment-start
+                              (subseq query-string 0 fragment-start)
+                              query-string))
+               ;; Parse and filter parameters
+               (params (cl-ppcre:split "&" query-only))
+               (filtered-params
+                 (remove-if
+                  (lambda (param)
+                    (let ((eq-pos (position #\= param)))
+                      (when eq-pos
+                        (let ((name (subseq param 0 eq-pos)))
+                          (member name *tracking-params* :test #'string-equal)))))
+                  params)))
+          (if filtered-params
+              ;; Reconstruct URL with remaining params
+              (concatenate 'string
+                           base-url "?"
+                           (format nil "~{~A~^&~}" filtered-params)
+                           (or fragment ""))
+              ;; No params left, return base URL (with fragment if any)
+              (concatenate 'string base-url (or fragment "")))))))
+
+;;; ----------------------------------------------------------------------------
 ;;; Event recording
 ;;; ----------------------------------------------------------------------------
 
@@ -132,7 +225,10 @@
          (session-id (generate-session-id visitor-hash timestamp))
          (ua-info (parse-user-agent user-agent))
          ;; Look up country from IP (before discarding IP)
-         (country (lookup-country ip)))
+         (country (lookup-country ip))
+         ;; Strip tracking parameters from URLs
+         (clean-url (strip-tracking-params url))
+         (clean-referrer (strip-tracking-params referrer)))
     (execute-sql
      "INSERT INTO events (site_id, timestamp, visitor_hash, session_id, url, referrer,
                           device_type, browser, os, country, viewport_width)
@@ -141,8 +237,8 @@
      timestamp
      visitor-hash
      session-id
-     url
-     (if (and referrer (string/= referrer "")) referrer nil)
+     clean-url
+     (if (and clean-referrer (string/= clean-referrer "")) clean-referrer nil)
      (getf ua-info :device-type)
      (getf ua-info :browser)
      (getf ua-info :os)

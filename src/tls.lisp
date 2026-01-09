@@ -34,12 +34,39 @@
       (otherwise (llog:info message)))))
 
 ;;; ----------------------------------------------------------------------------
-;;; ACME Acceptor Constructor
+;;; ACME Acceptor with Easy-Routes Support
 ;;; ----------------------------------------------------------------------------
 ;;;
-;;; Uses pure-tls/acme:make-acme-acceptor directly. The acme-acceptor class
-;;; extends hunchentoot:easy-acceptor, which handles *dispatch-table* for
-;;; easy-routes integration automatically.
+;;; The base acme-acceptor from pure-tls/acme extends hunchentoot:easy-acceptor,
+;;; but Happening uses easy-routes:defroute which requires easy-routes dispatch.
+;;; This subclass adds the easy-routes acceptor-dispatch-request method.
+
+(defclass happening-acme-acceptor (pure-tls/acme:acme-acceptor)
+  ()
+  (:documentation "ACME acceptor with easy-routes support for Happening."))
+
+(defmethod hunchentoot:acceptor-dispatch-request ((acceptor happening-acme-acceptor) request)
+  "Dispatch requests using easy-routes first, then fall back to easy-handlers."
+  (multiple-value-bind (easy-routes::*route* bindings)
+      (routes:match (easy-routes::acceptor-routes-mapper (hunchentoot:acceptor-name acceptor))
+                    (hunchentoot:request-uri request))
+    (if (not easy-routes::*route*)
+        ;; No route matched - fall back to dispatch table (static files, etc.)
+        (call-next-method)
+        ;; Route matched - process it
+        (handler-bind ((error #'hunchentoot:maybe-invoke-debugger))
+          (let ((result (easy-routes::process-route acceptor easy-routes::*route* bindings)))
+            (cond
+              ((pathnamep result)
+               (hunchentoot:handle-static-file
+                result
+                (or (hunchentoot:mime-type result)
+                    (hunchentoot:content-type hunchentoot:*reply*))))
+              (t result)))))))
+
+;;; ----------------------------------------------------------------------------
+;;; ACME Acceptor Constructor
+;;; ----------------------------------------------------------------------------
 
 (defun make-happening-acme-acceptor (domains email &key
                                                      (port 443)
@@ -48,11 +75,11 @@
                                                      (cert-store-path *cert-store-path*))
   "Create an ACME acceptor with automatic Let's Encrypt certificate management.
 
-   Uses pure-tls/acme:make-acme-acceptor which provides:
+   Uses happening-acme-acceptor which extends pure-tls/acme:acme-acceptor with:
+   - Easy-routes dispatch for route handling
    - Automatic certificate acquisition on startup
    - TLS-ALPN-01 challenge handling (no port 80 needed)
    - Background certificate renewal
-   - Integration with hunchentoot:easy-acceptor for route dispatching
 
    DOMAINS - Single domain string or list of domains for the certificate.
              The first domain is the primary (used for certificate storage).
@@ -73,13 +100,14 @@
                                    :production t)"
   (let ((store (when cert-store-path
                  (pure-tls/acme:make-cert-store :path (pathname cert-store-path)))))
-    (pure-tls/acme:make-acme-acceptor
-     domains email
-     :port port
-     :production production
-     :renewal-days renewal-days
-     :logger #'happening-acme-logger
-     :store store)))
+    (make-instance 'happening-acme-acceptor
+                   :domains (if (listp domains) domains (list domains))
+                   :email email
+                   :port port
+                   :production production
+                   :renewal-days renewal-days
+                   :logger #'happening-acme-logger
+                   :store store)))
 
 ;;; ----------------------------------------------------------------------------
 ;;; URL parsing and HTTPS detection

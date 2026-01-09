@@ -334,7 +334,7 @@ a:hover {
 /* Dashboard grid */
 .dashboard-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 1.5rem;
 }
 
@@ -343,6 +343,10 @@ a:hover {
   border-radius: var(--radius-lg);
   padding: 1.5rem;
   box-shadow: var(--shadow);
+}
+
+.dashboard-panel.panel-wide {
+  grid-column: span 2;
 }
 
 .dashboard-panel h3 {
@@ -468,6 +472,10 @@ a:hover {
 
   .dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-panel.panel-wide {
+    grid-column: span 1;
   }
 }
 

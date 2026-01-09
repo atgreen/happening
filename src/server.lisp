@@ -9,6 +9,34 @@
 (version-string:define-version-parameter +version+ :happening)
 
 ;;; ----------------------------------------------------------------------------
+;;; JSON encoding helper
+;;; ----------------------------------------------------------------------------
+
+(defun plist-to-alist (plist)
+  "Convert a plist to an alist for JSON encoding."
+  (loop for (key value) on plist by #'cddr
+        collect (cons key value)))
+
+(defun convert-for-json (data)
+  "Recursively convert plists to alists for proper JSON object encoding.
+   cl-json's guessing encoder treats plists as arrays but alists as objects."
+  (cond
+    ;; Null
+    ((null data) nil)
+    ;; Atom (number, string, symbol)
+    ((atom data) data)
+    ;; Plist (starts with a keyword)
+    ((and (listp data) (keywordp (car data)))
+     (loop for (key value) on data by #'cddr
+           collect (cons (string-downcase (symbol-name key))
+                         (convert-for-json value))))
+    ;; List of items (e.g., list of plists from database)
+    ((listp data)
+     (mapcar #'convert-for-json data))
+    ;; Fallback
+    (t data)))
+
+;;; ----------------------------------------------------------------------------
 ;;; Server machinery
 ;;; ----------------------------------------------------------------------------
 
@@ -244,7 +272,8 @@
                (end-date (or end (today)))
                (stats (get-dashboard-stats site-id start-date end-date)))
           (setf (hunchentoot:content-type*) "application/json")
-          (cl-json:encode-json-to-string stats))
+          ;; Convert plists to alists for proper JSON object encoding
+          (cl-json:encode-json-to-string (convert-for-json stats)))
         (progn
           (setf (hunchentoot:return-code*) hunchentoot:+http-not-found+)
           (setf (hunchentoot:content-type*) "application/json")
@@ -289,7 +318,7 @@
              (tls-port (or https-port 443))
              (email (or (uiop:getenv "ACME_EMAIL")
                         (format nil "admin@~A" domain)))
-             (production (string= (uiop:getenv "ACME_PRODUCTION") "true"))
+             (production (not (string= (uiop:getenv "ACME_STAGING") "true")))
              (cert-path (uiop:getenv "ACME_CERT_PATH"))
              (renewal-days (let ((env-val (uiop:getenv "ACME_RENEWAL_DAYS")))
                              (when env-val (parse-integer env-val :junk-allowed t)))))
@@ -298,6 +327,11 @@
         (llog:info (format nil "Let's Encrypt: ~A" (if production "production" "staging")))
         (when cert-path
           (llog:info (format nil "Certificate store: ~A" cert-path)))
+
+        ;; Enable handshake debug logging if requested
+        (when (string= (uiop:getenv "TLS_DEBUG") "true")
+          (llog:info "TLS handshake debug logging enabled")
+          (setf pure-tls::*handshake-debug* t))
 
         ;; The acme-acceptor handles certificate acquisition/renewal automatically
         (setf *acceptor* (make-happening-acme-acceptor

@@ -8,7 +8,7 @@
   :description "A privacy-focused, self-hosted web analytics platform"
   :author      "Anthony Green <green@moxielogic.org>"
   :license     "MIT"
-  :version     "0.1.0"
+  :version     "0.2.0"
   :depends-on  (:version-string
                 :clingon
                 :hunchentoot

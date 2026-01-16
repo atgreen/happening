@@ -23,7 +23,13 @@
       (let ((path (merge-pathnames filename assets-dir)))
         (when (probe-file path)
           (setf (gethash filename *embedded-assets*)
-                (alexandria:read-file-into-string path)))))))
+                (alexandria:read-file-into-string path)))))
+    ;; Load binary assets (favicons)
+    (dolist (filename '("favicon.ico" "favicon.svg"))
+      (let ((path (merge-pathnames filename assets-dir)))
+        (when (probe-file path)
+          (setf (gethash filename *embedded-assets*)
+                (alexandria:read-file-into-byte-vector path)))))))
 
 ;;; ----------------------------------------------------------------------------
 ;;; Embedded CSS
@@ -673,9 +679,27 @@ function formatPercent(n) {
                 (format nil "public, max-age=~D" max-age)))
         content))))
 
+(defun binary-asset-handler (filename content-type &optional max-age)
+  "Create a handler that serves binary content from the embedded assets hash table."
+  (lambda ()
+    (let ((content (get-embedded-asset filename)))
+      (when content
+        (setf (hunchentoot:content-type*) content-type)
+        (when max-age
+          (setf (hunchentoot:header-out :cache-control)
+                (format nil "public, max-age=~D" max-age)))
+        content))))
+
 (defun make-embedded-dispatch-table ()
   "Create dispatch table entries for embedded assets."
   (list
+   ;; Favicon
+   (hunchentoot:create-prefix-dispatcher
+    "/favicon.ico"
+    (binary-asset-handler "favicon.ico" "image/x-icon" 86400))
+   (hunchentoot:create-prefix-dispatcher
+    "/favicon.svg"
+    (binary-asset-handler "favicon.svg" "image/svg+xml" 86400))
    ;; CSS
    (hunchentoot:create-prefix-dispatcher
     "/css/style.css"

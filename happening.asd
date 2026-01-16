@@ -4,11 +4,18 @@
 ;;;
 ;;; Copyright (C) 2025 Anthony Green <green@moxielogic.org>
 
+;;; Use pure-tls instead of cl+ssl (OpenSSL FFI) for TLS on all platforms.
+;;; Load pure-tls/cl+ssl-compat first (provides cl+ssl-compatible API), then
+;;; register "cl+ssl" as immutable so ASDF never tries to load the real cl+ssl.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (asdf:load-system :pure-tls/cl+ssl-compat)
+  (asdf:register-immutable-system "cl+ssl"))
+
 (asdf:defsystem "happening"
   :description "A privacy-focused, self-hosted web analytics platform"
   :author      "Anthony Green <green@moxielogic.org>"
   :license     "MIT"
-  :version     "0.2.0"
+  :version     "0.3.0"
   :depends-on  (:version-string
                 :clingon
                 :hunchentoot
@@ -36,7 +43,9 @@
                 :pure-tls/acme+hunchentoot
                 :usocket
                 ;; TUI
-                :tuition)
+                :tuition
+                ;; Self-update
+                :cl-selfupdate/drakma)
   :serial      t
   :components  ((:file "src/package")
                 (:file "src/db")

@@ -307,7 +307,7 @@
                          (cl-ppcre:split "," trust-proxy-env)))))
       (llog:info (format nil "Proxy trust configured: ~A" *trust-proxy*))))
 
-  (llog:info (format nil "Starting Happening v~A (embedded assets)" +version+))
+  (llog:info (format nil "Starting Happening ~A (embedded assets)" +version+))
 
   ;; Set up static file handlers (for easy-routes dispatch)
   (setf hunchentoot:*dispatch-table* *static-dispatch-table*)

@@ -446,5 +446,5 @@
                                                      (cons "visitors" (getf day :|visitors|))))))))
              ;; Footer
              (:footer :class "dashboard-footer"
-                      (:p (cl-who:fmt "Happening v~A" +version+)))))
+                      (:p (cl-who:fmt "Happening ~A" +version+)))))
      :include-charts t)))

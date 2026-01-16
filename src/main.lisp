@@ -25,6 +25,49 @@
       (setf url-str (subseq url-str 0 (position #\: url-str))))
     url-str))
 
+(defun make-update-command ()
+  "Create the update subcommand for self-updating."
+  (let ((check-opt (clingon:make-option
+                    :flag
+                    :short-name #\c
+                    :long-name "check"
+                    :key :check
+                    :description "Check for updates without applying")))
+    (clingon:make-command
+     :name "update"
+     :description "Check for and apply updates from GitHub"
+     :usage "[OPTIONS]"
+     :options (list check-opt)
+     :handler (lambda (cmd)
+                (let ((check-only (clingon:getopt cmd :check)))
+                  ;; Strip the leading 'v' from version if present
+                  (let ((version (cl-ppcre:regex-replace "^v" +version+ "")))
+                    (setf cl-selfupdate:*current-version* version)
+                    (handler-case
+                        (multiple-value-bind (updated-p new-version old-version)
+                            (cl-selfupdate:update-self
+                             "atgreen" "happening"
+                             :executable-name "happening"
+                             :dry-run check-only)
+                          (declare (ignore old-version))
+                          (cond
+                            ((and updated-p (not check-only))
+                             (format t "~&Updated to version ~A. Please restart happening.~%" new-version)
+                             (uiop:quit 0))
+                            ((and updated-p check-only)
+                             (format t "~&Update available: ~A~%" new-version)
+                             (uiop:quit 0))
+                            (t
+                             (format t "~&Already up to date.~%")
+                             (uiop:quit 0))))
+                      (cl-selfupdate:update-failed (e)
+                        (format *error-output* "~&Update failed: ~A~%"
+                                (cl-selfupdate:update-failed-message e))
+                        (uiop:quit 1))
+                      (error (e)
+                        (format *error-output* "~&Error checking for updates: ~A~%" e)
+                        (uiop:quit 1)))))))))
+
 (defun make-setup-command ()
   "Create the setup subcommand for non-interactive setup."
   (let ((admin-opt (clingon:make-option
@@ -231,7 +274,7 @@
                     ;; Wait forever
                     (bt:condition-wait *shutdown-cv* *server-lock*))))
 
-     :sub-commands (list (make-setup-command))
+     :sub-commands (list (make-setup-command) (make-update-command))
      :examples '(("Run on default port 8080:"
                   . "happening")
                  ("Run with public URL for tracking snippets:"
@@ -241,7 +284,11 @@
                  ("Use custom database location:"
                   . "happening -d /var/lib/happening/data.db")
                  ("Non-interactive setup:"
-                  . "happening setup -a admin -P mypassword -u https://analytics.example.com -e admin@example.com")))))
+                  . "happening setup -a admin -P mypassword -u https://analytics.example.com -e admin@example.com")
+                 ("Check for updates:"
+                  . "happening update --check")
+                 ("Update to latest version:"
+                  . "happening update")))))
 
 (defun main ()
   "The main entrypoint."

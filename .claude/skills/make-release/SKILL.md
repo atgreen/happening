@@ -85,10 +85,26 @@ To decide what goes in the notes, diff against the most recent tag:
 git log $(git describe --tags --abbrev=0)..HEAD --oneline
 ```
 
+**Check updated dependencies for noteworthy changes:**
+
+```bash
+git diff $(git describe --tags --abbrev=0)..HEAD -- ocicl.csv
+```
+
+For each dependency that changed, especially security-critical ones like `pure-tls`, check the upstream changelog or commit history for user-facing changes (security fixes, new features, breaking changes). For example:
+
+```bash
+cd /home/green/git/pure-tls && git log --oneline --since="LAST_TAG_DATE" --until="NOW"
+```
+
+Surface important upstream changes in the release notes — particularly security fixes, which should get their own ## Security section with advisory IDs and descriptions.
+
 Include ONLY user-facing changes:
+- Security fixes (from dependencies or this project)
 - Bug fixes
 - New features
 - Breaking changes (if any)
+- Notable dependency updates (with version info)
 
 Do NOT include internal changes (refactors, lint fixes, doc updates, CI changes, directory reorganization). Those are visible in the git log for anyone who needs them.
 

@@ -39,7 +39,7 @@ jobs:
           retention-days: 1
 
   # ========================================
-  # Build Linux binary
+  # Build Linux binary and generate SBOM
   # ========================================
   build-linux:
     needs: fetch-deps
@@ -79,11 +79,14 @@ jobs:
       - name: Build
         run: make
 
-      - name: Get version
+      - name: Extract version from tag
         id: version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate SBOM
+        run: ocicl create-sbom cyclonedx happening-sbom.json
 
       - name: Package Linux binary
         run: |
@@ -94,49 +97,120 @@ jobs:
           cp -r LICENSES dist/ 2>/dev/null || true
           cd dist && tar czf ../happening-${VERSION}-linux-amd64.tar.gz *
 
-      - name: Calculate checksum
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          sha256sum happening-${VERSION}-linux-amd64.tar.gz > checksums-linux.txt
-          cat checksums-linux.txt
-
-      - name: Upload Linux artifact
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-package
           path: |
             ./happening-*-linux-*.tar.gz
-            ./checksums-linux.txt
+            ./happening-sbom.json
+
+  # ========================================
+  # Sign binary tarball with Cosign
+  # ========================================
+  sign-artifacts:
+    needs: build-linux
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-package
+          path: ./artifacts
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign binary tarball with Cosign
+        run: |
+          cd artifacts
+          cosign sign-blob --yes \
+            --bundle happening-*-linux-amd64.tar.gz.bundle \
+            happening-*-linux-amd64.tar.gz
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-package
+          path: |
+            artifacts/happening-*-linux-amd64.tar.gz
+            artifacts/happening-*-linux-amd64.tar.gz.bundle
+            artifacts/happening-sbom.json
+
+  # ========================================
+  # Generate SLSA Level 3 provenance
+  # ========================================
+  generate-provenance-subjects:
+    needs: sign-artifacts
+    runs-on: ubuntu-latest
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+    steps:
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-package
+          path: ./artifacts
+
+      - name: Generate hashes for SLSA provenance
+        id: hash
+        run: |
+          cd artifacts
+          sha256sum *.tar.gz > checksums.txt
+          cat checksums.txt
+          echo "hashes=$(cat checksums.txt | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+  slsa-provenance:
+    needs: [generate-provenance-subjects]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.generate-provenance-subjects.outputs.hashes }}"
+      upload-assets: true
+      provenance-name: provenance.intoto.jsonl
 
   # ========================================
   # Create GitHub Release
   # ========================================
   release:
-    needs: [build-linux]
-    permissions: write-all
+    needs: [build-linux, sign-artifacts, slsa-provenance]
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download signed artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: signed-package
+          path: ./artifacts
 
-      - name: Extract version number
-        id: get_version
+      - name: Extract version from tag
+        id: version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum *.tar.gz *.json *.bundle > checksums.sha256
+          cat checksums.sha256
 
       - name: Create GitHub release
-        uses: ncipollo/release-action@v1
+        uses: softprops/action-gh-release@v2
         with:
-          tag: ${{ github.ref_name }}
           name: Happening ${{ github.ref_name }}
-          bodyFile: docs/release-notes/RELEASE-NOTES-${{ steps.get_version.outputs.version }}.md
-          artifacts: |
-            artifacts/linux-package/happening-*-linux-*.tar.gz
-            artifacts/linux-package/checksums-linux.txt
-          allowUpdates: true
+          body_path: docs/release-notes/RELEASE-NOTES-${{ steps.version.outputs.version }}.md
+          files: |
+            artifacts/happening-*-linux-amd64.tar.gz
+            artifacts/happening-*-linux-amd64.tar.gz.bundle
+            artifacts/happening-sbom.json
+            artifacts/checksums.sha256

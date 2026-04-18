@@ -88,11 +88,11 @@
   (focus-current-input model)
   nil)
 
-(defmethod tui:update-message ((model setup-model) (msg tui:key-msg))
-  (let ((key (tui:key-msg-key msg)))
+(defmethod tui:update-message ((model setup-model) (msg tui:key-press-msg))
+  (let ((key (tui:key-event-code msg)))
     (cond
       ;; Quit on Ctrl+C or Escape
-      ((or (and (tui:key-msg-ctrl msg) (eql key #\c))
+      ((or (and (tui:mod-contains (tui:key-event-mod msg) tui:+mod-ctrl+) (eql key #\c))
            (eql key :escape))
        (values model (tui:quit-cmd)))
 
@@ -164,16 +164,17 @@
        (values model nil)))))
 
 (defmethod tui:view ((model setup-model))
-  (if (setup-complete model)
-      ;; Show completion screen
-      (tui:join-vertical
-       tui:+left+
-       ""
-       (tui:bold (tui:colored "  Setup Complete!" :fg tui:*fg-green*))
-       ""
-       "  Admin account created successfully."
-       ""
-       "  Press any key to start the server...")
+  (tui:make-view
+   (if (setup-complete model)
+       ;; Show completion screen
+       (tui:join-vertical
+        tui:+left+
+        ""
+        (tui:bold (tui:colored "  Setup Complete!" :fg tui:*fg-green*))
+        ""
+        "  Admin account created successfully."
+        ""
+        "  Press any key to start the server...")
 
       ;; Show setup form
       (let* ((step (setup-step model))
@@ -234,7 +235,8 @@
          ""
          error-line
          ""
-         help-line))))
+         help-line)))
+   :alt-screen t))
 
 ;;; ----------------------------------------------------------------------------
 ;;; Entry point
@@ -243,5 +245,5 @@
 (defun run-setup-wizard ()
   "Run the TUI setup wizard. Returns T if setup completed, NIL if cancelled."
   (let ((model (make-setup-model)))
-    (tui:run (tui:make-program model :alt-screen t))
+    (tui:run (tui:make-program model))
     (setup-complete model)))

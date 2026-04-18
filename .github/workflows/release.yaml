@@ -42,6 +42,11 @@ jobs:
       - name: Fetch Lisp dependencies
         run: ocicl install
 
+      - name: Generate SBOMs
+        run: |
+          ocicl create-sbom cyclonedx happening-sbom.json
+          ocicl create-sbom spdx happening-sbom.spdx.json
+
       - name: Upload ocicl directory
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -49,8 +54,17 @@ jobs:
           path: ocicl
           retention-days: 1
 
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: |
+            happening-sbom.json
+            happening-sbom.spdx.json
+          retention-days: 1
+
   # ========================================
-  # Build Linux binary and generate SBOM
+  # Build Linux tarball
   # ========================================
   build-linux:
     needs: [fetch-deps, extract-version]
@@ -83,14 +97,20 @@ jobs:
           repository: ipverse/country-ip-blocks
           path: data/country-ip-blocks
 
+      - name: Remove .git to prevent dirty version detection
+        run: rm -rf .git
+
       - name: Generate embedded GeoIP data
         run: make generate-geoip
 
       - name: Build
         run: make
 
-      - name: Generate SBOM
-        run: ocicl create-sbom cyclonedx happening-sbom.json
+      - name: Download SBOM
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sbom
+          path: .
 
       - name: Package Linux binary
         run: |
@@ -109,7 +129,176 @@ jobs:
             happening-sbom.json
 
   # ========================================
-  # Sign binary tarball with Cosign
+  # Build RPM package
+  # ========================================
+  build-rpm:
+    needs: [fetch-deps, extract-version]
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    env:
+      VERSION: ${{ needs.extract-version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download ocicl dependencies
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ocicl-deps
+          path: ocicl
+
+      - name: Download SBOM
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sbom
+          path: .
+
+      - name: Install build dependencies
+        run: |
+          dnf install -y rpm-build rpmdevtools rpm-sign sbcl libfixposix-devel gcc make
+
+      - name: Setup rpmbuild directory
+        run: |
+          rpmdev-setuptree
+
+      - name: Remove .git to prevent dirty version detection
+        run: rm -rf .git
+
+      - name: Create source tarball
+        run: |
+          cd ..
+          tar czf ~/rpmbuild/SOURCES/happening-${VERSION}.tar.gz \
+            --transform "s,^happening,happening-${VERSION}," \
+            happening
+
+      - name: Update spec file version
+        run: |
+          sed -i "s/^Version:.*/Version:        ${VERSION}/" releng/happening.spec
+          cp releng/happening.spec ~/rpmbuild/SPECS/
+
+      - name: Build RPM and SRPM
+        run: |
+          cd ~/rpmbuild/SPECS
+          rpmbuild -ba happening.spec
+
+      - name: Sign RPMs
+        env:
+          RPM_GPG_PRIVATE_KEY: ${{ secrets.RPM_GPG_PRIVATE_KEY }}
+        if: ${{ env.RPM_GPG_PRIVATE_KEY != '' }}
+        run: |
+          # Configure gpg for non-interactive use BEFORE first gpg invocation
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          echo "allow-loopback-pinentry" > ~/.gnupg/gpg-agent.conf
+          echo "pinentry-mode loopback" > ~/.gnupg/gpg.conf
+          # Import signing key
+          echo "${RPM_GPG_PRIVATE_KEY}" | base64 -d | gpg --batch --import
+          GPG_NAME=$(gpg --list-secret-keys --with-colons | awk -F: '/^uid/{print $10; exit}')
+          echo "Signing as: ${GPG_NAME}"
+          # Configure rpm macros
+          echo "%_signature gpg" > ~/.rpmmacros
+          echo "%_gpg_name ${GPG_NAME}" >> ~/.rpmmacros
+          # Sign packages
+          rpmsign --addsign ~/rpmbuild/RPMS/x86_64/*.rpm
+          rpmsign --addsign ~/rpmbuild/SRPMS/*.src.rpm || true
+          # Import public key into rpm db and verify
+          gpg --export --armor "${GPG_NAME}" | rpm --import -
+          rpm --checksig ~/rpmbuild/RPMS/x86_64/*.rpm
+
+      - name: Copy RPM and SRPM to workspace
+        run: |
+          cp ~/rpmbuild/RPMS/x86_64/*.rpm ${GITHUB_WORKSPACE}/ || true
+          cp ~/rpmbuild/SRPMS/*.src.rpm ${GITHUB_WORKSPACE}/ || true
+
+      - name: Upload RPM artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rpm-packages
+          path: ./*.rpm
+
+  # ========================================
+  # Build DEB package
+  # ========================================
+  build-deb:
+    needs: [fetch-deps, extract-version]
+    runs-on: ubuntu-latest
+    container:
+      image: debian:stable
+    env:
+      VERSION: ${{ needs.extract-version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download ocicl dependencies
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ocicl-deps
+          path: ocicl
+
+      - name: Download SBOM
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sbom
+          path: .
+
+      - name: Remove .git to prevent dirty version detection
+        run: rm -rf .git
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y debhelper devscripts sbcl libfixposix-dev gcc make gpg debsigs
+
+      - name: Update changelog version
+        run: |
+          sed -i "s/^happening (.*)/happening (${VERSION}-1) unstable; urgency=medium/" releng/debian/changelog
+
+      - name: Build DEB packages (binary and source)
+        run: |
+          ln -s releng/debian debian
+          dpkg-buildpackage -uc -us
+
+      - name: Sign DEB packages
+        env:
+          DEB_GPG_PRIVATE_KEY: ${{ secrets.RPM_GPG_PRIVATE_KEY }}
+        if: ${{ env.DEB_GPG_PRIVATE_KEY != '' }}
+        run: |
+          # Configure gpg for non-interactive use
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          echo "allow-loopback-pinentry" > ~/.gnupg/gpg-agent.conf
+          echo "pinentry-mode loopback" > ~/.gnupg/gpg.conf
+          # Import signing key
+          echo "${DEB_GPG_PRIVATE_KEY}" | base64 -d | gpg --batch --import
+          # Sign .deb packages
+          GPG_KEYID=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')
+          for deb in ../*.deb; do
+            debsigs --sign=origin -k "${GPG_KEYID}" "${deb}"
+          done
+
+      - name: Copy DEB and source files to workspace
+        run: |
+          cp ../*.deb . 2>/dev/null || true
+          cp ../*.dsc . 2>/dev/null || true
+          cp ../*.tar.* . 2>/dev/null || true
+          cp ../*.buildinfo . 2>/dev/null || true
+          cp ../*.changes . 2>/dev/null || true
+
+      - name: Upload DEB artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deb-packages
+          path: |
+            ./*.deb
+            ./*.dsc
+            ./*.tar.*
+            ./*.buildinfo
+            ./*.changes
+
+  # ========================================
+  # Sign binary tarball with Cosign (keyless)
   # ========================================
   sign-artifacts:
     needs: [build-linux, extract-version]
@@ -140,32 +329,29 @@ jobs:
         with:
           name: signed-package
           path: |
-            artifacts/happening-${{ env.VERSION }}-linux-amd64.tar.gz
             artifacts/happening-${{ env.VERSION }}-linux-amd64.tar.gz.bundle
-            artifacts/happening-sbom.json
 
   # ========================================
   # Generate SLSA Level 3 provenance
   # ========================================
   generate-provenance-subjects:
-    needs: [sign-artifacts, extract-version]
+    needs: [build-linux, build-rpm, build-deb, extract-version]
     runs-on: ubuntu-latest
     outputs:
       hashes: ${{ steps.hash.outputs.hashes }}
     env:
       VERSION: ${{ needs.extract-version.outputs.version }}
     steps:
-      - name: Download signed artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: signed-package
-          path: ./artifacts
+          path: artifacts
 
       - name: Generate hashes for SLSA provenance
         id: hash
         run: |
           cd artifacts
-          sha256sum happening-${VERSION}-linux-amd64.tar.gz > checksums.txt
+          find . -type f \( -name '*.rpm' -o -name '*.deb' -o -name '*.tar.gz' \) -exec sha256sum {} \; | sed 's|  \./[^/]*/|  |' > checksums.txt
           cat checksums.txt
           echo "hashes=$(cat checksums.txt | base64 -w0)" >> "$GITHUB_OUTPUT"
 
@@ -187,9 +373,11 @@ jobs:
   # Create GitHub Release
   # ========================================
   release:
-    needs: [build-linux, sign-artifacts, slsa-provenance, extract-version]
+    needs: [build-linux, build-rpm, build-deb, sign-artifacts, slsa-provenance, extract-version]
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.extract-version.outputs.version }}
@@ -197,25 +385,305 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Download signed artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: signed-package
-          path: ./artifacts
+          path: artifacts
 
-      - name: Generate checksums
+      - name: Generate consolidated checksums
         run: |
           cd artifacts
-          sha256sum happening-${VERSION}-linux-amd64.tar.gz happening-sbom.json happening-${VERSION}-linux-amd64.tar.gz.bundle > checksums.sha256
-          cat checksums.sha256
+          find . -type f \( -name '*.rpm' -o -name '*.deb' -o -name '*.tar.gz' -o -name '*.json' \) -exec sha256sum {} \; | sed 's|  \./[^/]*/|  |' > ../checksums.sha256
+          cat ../checksums.sha256
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
         with:
+          tag: ${{ github.ref_name }}
           name: Happening ${{ github.ref_name }}
-          body_path: docs/release-notes/RELEASE-NOTES-${{ env.VERSION }}.md
-          files: |
-            artifacts/happening-${{ env.VERSION }}-linux-amd64.tar.gz
-            artifacts/happening-${{ env.VERSION }}-linux-amd64.tar.gz.bundle
-            artifacts/happening-sbom.json
-            artifacts/checksums.sha256
+          bodyFile: docs/release-notes/RELEASE-NOTES-${{ env.VERSION }}.md
+          artifacts: |
+            artifacts/rpm-packages/*.rpm
+            artifacts/deb-packages/*.deb
+            artifacts/deb-packages/*.dsc
+            artifacts/deb-packages/*.tar.*
+            artifacts/linux-package/*.tar.gz
+            artifacts/sbom/happening-sbom.json
+            artifacts/signed-package/*.bundle
+            checksums.sha256
+          allowUpdates: true
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            artifacts/rpm-packages/*.rpm
+            artifacts/deb-packages/*.deb
+            artifacts/linux-package/*.tar.gz
+
+  # ========================================
+  # Build RPM repository metadata
+  # ========================================
+  build-rpm-repo:
+    needs: [release, extract-version]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.extract-version.outputs.version }}
+      TAG: v${{ needs.extract-version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install createrepo_c
+        run: sudo apt-get install -y createrepo-c
+
+      - name: Download RPM assets from release
+        run: |
+          mkdir -p /tmp/rpms
+          gh release download "${TAG}" --pattern '*.rpm' --dir /tmp/rpms --skip-existing
+          echo "Downloaded RPMs:"
+          ls -lh /tmp/rpms/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build repodata
+        run: createrepo_c /tmp/rpms
+
+      - name: Rewrite package locations to release asset URLs
+        run: |
+          REPO="${{ github.repository }}"
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+
+          cd /tmp/rpms/repodata
+
+          # Decompress primary.xml
+          gunzip -f *-primary.xml.gz
+          PRIMARY=$(ls *-primary.xml)
+
+          # Replace relative hrefs with absolute GitHub URLs
+          sed -i "s|<location href=\"\([^\"]*\.rpm\)\"|<location href=\"${BASE}/\1\"|g" "${PRIMARY}"
+
+          # Recompress
+          gzip -9 "${PRIMARY}"
+
+          # Rebuild repomd.xml with correct checksums
+          cd /tmp/rpms
+          REPODATA=repodata
+
+          cat > "${REPODATA}/repomd.xml" <<'XMLHEADER'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <repomd xmlns="http://linux.duke.edu/metadata/repo">
+          XMLHEADER
+
+          for gz in "${REPODATA}"/*.xml.gz; do
+            fname="$(basename "${gz}")"
+            # Type is e.g. "primary" from "abc123-primary.xml.gz"
+            type="$(echo "${fname}" | sed 's/.*-\([a-z_]*\)\.xml\.gz/\1/')"
+
+            checksum="$(sha256sum "${gz}" | awk '{print $1}')"
+            size="$(stat -c%s "${gz}")"
+
+            open_file="${gz%.gz}"
+            gunzip -k -f "${gz}"
+            open_checksum="$(sha256sum "${open_file}" | awk '{print $1}')"
+            open_size="$(stat -c%s "${open_file}")"
+            rm -f "${open_file}"
+
+            cat >> "${REPODATA}/repomd.xml" <<XMLDATA
+            <data type="${type}">
+              <checksum type="sha256">${checksum}</checksum>
+              <open-checksum type="sha256">${open_checksum}</open-checksum>
+              <location href="repodata/${fname}"/>
+              <size>${size}</size>
+              <open-size>${open_size}</open-size>
+            </data>
+          XMLDATA
+          done
+
+          echo "</repomd>" >> "${REPODATA}/repomd.xml"
+
+          # Clean up indentation from heredoc
+          sed -i 's/^          //' "${REPODATA}/repomd.xml"
+
+      - name: Sign repomd.xml and export public key
+        env:
+          RPM_GPG_PRIVATE_KEY: ${{ secrets.RPM_GPG_PRIVATE_KEY }}
+        if: ${{ env.RPM_GPG_PRIVATE_KEY != '' }}
+        run: |
+          echo "${RPM_GPG_PRIVATE_KEY}" | base64 -d | gpg --batch --import
+          gpg --batch --detach-sign --armor /tmp/rpms/repodata/repomd.xml
+          gpg --batch --export --armor > /tmp/rpms/RPM-GPG-KEY-happening
+
+      - name: Upload RPM repo artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rpm-repo
+          path: /tmp/rpms/repodata/
+          include-hidden-files: false
+
+      - name: Upload RPM GPG key
+        if: ${{ hashFiles('/tmp/rpms/RPM-GPG-KEY-happening') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rpm-repo-key
+          path: /tmp/rpms/RPM-GPG-KEY-happening
+
+  # ========================================
+  # Build DEB repository metadata
+  # ========================================
+  build-deb-repo:
+    needs: [release, extract-version]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.extract-version.outputs.version }}
+      TAG: v${{ needs.extract-version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install APT repo tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev gpg
+
+      - name: Download DEB assets from release
+        run: |
+          mkdir -p /tmp/debs
+          gh release download "${TAG}" --pattern '*.deb' --dir /tmp/debs --skip-existing
+          echo "Downloaded DEBs:"
+          ls -lh /tmp/debs/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Import GPG key
+        env:
+          DEB_GPG_PRIVATE_KEY: ${{ secrets.RPM_GPG_PRIVATE_KEY }}
+        if: ${{ env.DEB_GPG_PRIVATE_KEY != '' }}
+        run: |
+          echo "${DEB_GPG_PRIVATE_KEY}" | base64 -d | gpg --batch --import
+          GPG_KEY_ID=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')
+          echo "GPG_KEY_ID=${GPG_KEY_ID}" >> "$GITHUB_ENV"
+          # Export public key for the repo
+          gpg --batch --export --armor > /tmp/debs/happening-archive-keyring.gpg
+
+      - name: Build APT repository
+        run: |
+          REPO_DIR=/tmp/apt-repo
+          mkdir -p "${REPO_DIR}/pool/main"
+          mkdir -p "${REPO_DIR}/dists/stable/main/binary-amd64"
+
+          # Copy new .deb files to pool
+          cp /tmp/debs/*.deb "${REPO_DIR}/pool/main/"
+
+          # Keep only the latest .deb for each package name (avoid repo bloat)
+          cd "${REPO_DIR}/pool/main"
+          for pkg in $(ls *.deb | sed 's/_[0-9].*//' | sort -u); do
+            # Keep only the newest version of each package
+            ls -t ${pkg}_*.deb | tail -n +2 | xargs rm -f 2>/dev/null || true
+          done
+          cd "${REPO_DIR}"
+
+          # Generate Packages file
+          dpkg-scanpackages pool/main > dists/stable/main/binary-amd64/Packages
+          gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
+
+          # Generate Release file
+          cd dists/stable
+          cat > Release <<EOF
+          Origin: happening
+          Label: happening
+          Suite: stable
+          Codename: stable
+          Date: $(date -Ru)
+          Architectures: amd64
+          Components: main
+          Description: Happening APT repository
+          EOF
+          sed -i 's/^          //' Release
+
+          # Add checksums to Release file
+          {
+            echo "MD5Sum:"
+            for f in main/binary-amd64/Packages main/binary-amd64/Packages.gz; do
+              SIZE=$(stat -c%s "$f")
+              MD5=$(md5sum "$f" | awk '{print $1}')
+              printf " %s %16d %s\n" "$MD5" "$SIZE" "$f"
+            done
+            echo "SHA256:"
+            for f in main/binary-amd64/Packages main/binary-amd64/Packages.gz; do
+              SIZE=$(stat -c%s "$f")
+              SHA=$(sha256sum "$f" | awk '{print $1}')
+              printf " %s %16d %s\n" "$SHA" "$SIZE" "$f"
+            done
+          } >> Release
+
+      - name: Sign Release file
+        env:
+          DEB_GPG_PRIVATE_KEY: ${{ secrets.RPM_GPG_PRIVATE_KEY }}
+        if: ${{ env.DEB_GPG_PRIVATE_KEY != '' }}
+        run: |
+          cd /tmp/apt-repo/dists/stable
+          gpg --batch --yes --armor --detach-sign -o Release.gpg Release
+          gpg --batch --yes --armor --clearsign -o InRelease Release
+
+      - name: Upload DEB repo artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deb-repo
+          path: /tmp/apt-repo/
+
+      - name: Upload DEB keyring
+        if: ${{ hashFiles('/tmp/debs/happening-archive-keyring.gpg') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deb-repo-key
+          path: /tmp/debs/happening-archive-keyring.gpg
+
+  # ========================================
+  # Deploy package repos + docs to GitHub Pages
+  # ========================================
+  deploy-pages:
+    needs: [build-rpm-repo, build-deb-repo, extract-version]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download RPM repo artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rpm-repo
+          path: docs/rpm-repo/repodata
+
+      - name: Download RPM GPG key
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rpm-repo-key
+          path: docs/rpm-repo
+        continue-on-error: true
+
+      - name: Download DEB repo artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: deb-repo
+          path: docs/deb-repo
+
+      - name: Download DEB keyring
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: deb-repo-key
+          path: docs/deb-repo
+        continue-on-error: true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: docs/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac553fd0d31 # v4

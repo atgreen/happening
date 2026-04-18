@@ -1,0 +1,7 @@
+[happening]
+name=Happening - Privacy-focused web analytics
+baseurl=https://atgreen.github.io/happening/rpm-repo
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://atgreen.github.io/happening/rpm-repo/RPM-GPG-KEY-happening

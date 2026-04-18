@@ -1,0 +1,12 @@
+Source: happening
+Section: web
+Priority: optional
+Maintainer: Anthony Green <green@moxielogic.com>
+Build-Depends: debhelper (>= 13), sbcl, libfixposix-dev, gcc, make
+
+Package: happening
+Architecture: amd64
+Description: A privacy-focused, self-hosted web analytics platform
+ Happening is a privacy-focused, self-hosted web analytics platform built
+ in Common Lisp. It provides lightweight, cookie-free website analytics
+ with a focus on data ownership and user privacy.
